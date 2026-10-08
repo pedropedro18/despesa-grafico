@@ -1,4 +1,4 @@
-"""Controle de despesas em Streamlit + matplotlib.
+"""Controle de despesas e entradas em Streamlit + matplotlib.
 
 Requisitos: pip install streamlit matplotlib pandas
 Executar:   streamlit run app.py
@@ -16,8 +16,15 @@ import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
 import streamlit as st
 
-ARQUIVO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "despesas.json")
+BASE = os.path.dirname(os.path.abspath(__file__))
+ARQUIVO = os.path.join(BASE, "despesas.json")
+ORC_ARQ = os.path.join(BASE, "orcamento.json")
+REC_ARQ = os.path.join(BASE, "recorrentes.json")
+ENT_ARQ = os.path.join(BASE, "entradas.json")
+
 CATEGORIAS = ["Alimentação", "Transporte", "Moradia", "Saúde", "Educação", "Lazer", "Outros"]
+FONTES = ["Salário", "Freelance", "Investimentos", "Presente", "Outros"]
+COLS = ["data", "descricao", "categoria", "valor"]
 
 st.set_page_config(page_title="Controle de Despesas", page_icon="💰", layout="wide")
 
@@ -126,7 +133,12 @@ def salvar(despesas):
     gravar_dado("despesas", despesas, ARQUIVO)
 
 
-ORC_ARQ = os.path.join(os.path.dirname(os.path.abspath(__file__)), "orcamento.json")
+def carregar_ent():
+    return ler_dado("entradas", [], ENT_ARQ)
+
+
+def salvar_ent(entradas):
+    gravar_dado("entradas", entradas, ENT_ARQ)
 
 
 def carregar_orc():
@@ -135,9 +147,6 @@ def carregar_orc():
 
 def salvar_orc(orc):
     gravar_dado("orcamento", orc, ORC_ARQ)
-
-
-REC_ARQ = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recorrentes.json")
 
 
 def carregar_rec():
@@ -176,7 +185,17 @@ def aplicar_recorrentes(despesas, recorrentes):
     return mudou
 
 
+def montar_df(lista):
+    """Converte a lista de lançamentos num DataFrame (mesmo se estiver vazia)."""
+    df = pd.DataFrame(lista) if lista else pd.DataFrame(columns=COLS)
+    df["data"] = pd.to_datetime(df["data"])
+    df["valor"] = pd.to_numeric(df["valor"])
+    df["mes"] = df["data"].dt.strftime("%Y-%m")
+    return df
+
+
 despesas = carregar()
+entradas = carregar_ent()
 orcamento = carregar_orc()
 recorrentes = carregar_rec()
 
@@ -186,8 +205,28 @@ if aplicar_recorrentes(despesas, recorrentes):
 
 st.title("💰 Controle de Despesas")
 
-# ---------- Formulário ----------
+# ---------- Barra lateral ----------
 with st.sidebar:
+    st.header("Nova entrada")
+    with st.form("nova_entrada", clear_on_submit=True):
+        e_desc = st.text_input("Descrição")
+        e_cat = st.selectbox("Fonte", FONTES)
+        e_valor = st.number_input("Valor", min_value=0.0, step=100.0, format="%.2f", key="e_valor")
+        e_data = st.date_input("Data", value=date.today(), key="e_data")
+        if st.form_submit_button("Adicionar entrada"):
+            if e_valor > 0:
+                entradas.append({
+                    "data": e_data.isoformat(),
+                    "descricao": e_desc,
+                    "categoria": e_cat,
+                    "valor": e_valor,
+                })
+                salvar_ent(entradas)
+                st.success("Entrada adicionada.")
+                st.rerun()
+            else:
+                st.error("O valor deve ser maior que zero.")
+
     st.header("Nova despesa")
     with st.form("nova", clear_on_submit=True):
         descricao = st.text_input("Descrição")
@@ -208,7 +247,6 @@ with st.sidebar:
             else:
                 st.error("O valor deve ser maior que zero.")
 
-with st.sidebar:
     st.header("Despesas fixas (mensais)")
     with st.form("rec", clear_on_submit=True):
         r_desc = st.text_input("Descrição (ex: Renda, Internet)")
@@ -252,23 +290,42 @@ with st.sidebar:
             st.success("Orçamento guardado.")
             st.rerun()
 
-if not despesas:
-    st.info("Ainda não há despesas. Adiciona a primeira na barra lateral.")
-    st.stop()
+# ---------- Dados ----------
+df_d = montar_df(despesas)
+df_e = montar_df(entradas)
 
-df = pd.DataFrame(despesas)
-df["data"] = pd.to_datetime(df["data"])
-df["mes"] = df["data"].dt.strftime("%Y-%m")
+# ---------- Filtro por mês (padrão: mês atual) ----------
+mes_atual = date.today().strftime("%Y-%m")
+lista_meses = sorted(set(df_d["mes"]) | set(df_e["mes"]) | {mes_atual}, reverse=True)
+meses = ["Todos"] + lista_meses
+mes_sel = st.selectbox("Mês", meses, index=meses.index(mes_atual))
 
-# ---------- Filtro por mês ----------
-meses = ["Todos"] + sorted(df["mes"].unique(), reverse=True)
-mes_sel = st.selectbox("Filtrar por mês", meses)
-dff = df if mes_sel == "Todos" else df[df["mes"] == mes_sel]
+dff = df_d if mes_sel == "Todos" else df_d[df_d["mes"] == mes_sel]
+dfe = df_e if mes_sel == "Todos" else df_e[df_e["mes"] == mes_sel]
 
+total_e = float(dfe["valor"].sum())
+total_d = float(dff["valor"].sum())
+saldo = total_e - total_d
+media = float(dff["valor"].mean()) if len(dff) else 0.0
+
+# ---------- Indicadores e balanço ----------
 c1, c2, c3 = st.columns(3)
-c1.metric("Total gasto", f"{dff['valor'].sum():,.2f}")
-c2.metric("Nº de despesas", len(dff))
-c3.metric("Média por despesa", f"{dff['valor'].mean():,.2f}")
+c1.metric("Entradas", f"{total_e:,.2f}")
+c2.metric("Despesas", f"{total_d:,.2f}")
+c3.metric("Saldo final", f"{saldo:,.2f}")
+
+c4, c5 = st.columns(2)
+c4.metric("Nº de despesas", len(dff))
+c5.metric("Média por despesa", f"{media:,.2f}")
+
+if saldo < 0:
+    st.error(f"⚠️ Gastaste mais do que recebeste: saldo de {saldo:,.2f}.")
+elif total_e > 0:
+    pct = total_d / total_e
+    st.progress(min(pct, 1.0), text=f"{pct:.0%} das entradas já foram gastas")
+    st.success(f"Sobram {saldo:,.2f}.")
+elif total_d > 0:
+    st.warning("Há despesas, mas nenhuma entrada neste período.")
 
 # ---------- Orçamento e alertas ----------
 if mes_sel != "Todos" and any(v > 0 for v in orcamento.values()):
@@ -292,79 +349,101 @@ elif any(v > 0 for v in orcamento.values()):
 g1, g2 = st.columns(2)
 
 with g1:
-    por_cat = dff.groupby("categoria")["valor"].sum()
-    fig1, ax1 = plt.subplots()
-    ax1.pie(por_cat, labels=por_cat.index, autopct="%1.1f%%", startangle=90)
-    ax1.set_title("Por categoria")
-    st.pyplot(fig1)
+    st.subheader("Despesas por categoria")
+    if dff.empty:
+        st.info("Sem despesas neste período.")
+    else:
+        por_cat = dff.groupby("categoria")["valor"].sum()
+        fig1, ax1 = plt.subplots()
+        ax1.pie(por_cat, labels=por_cat.index, autopct="%1.1f%%", startangle=90)
+        st.pyplot(fig1)
 
 with g2:
-    por_mes = df.groupby("mes")["valor"].sum().sort_index()
+    st.subheader("Entradas vs Despesas")
     fig2, ax2 = plt.subplots()
-    barras = ax2.bar(por_mes.index, por_mes.values, color="#4C78A8")
+    barras = ax2.bar(
+        ["Entradas", "Despesas", "Saldo"],
+        [total_e, total_d, saldo],
+        color=["#2E7D32", "#C62828", "#1565C0" if saldo >= 0 else "#EF6C00"],
+    )
     ax2.bar_label(barras, fmt="%.0f")
-    ax2.set_title("Por mês")
-    plt.setp(ax2.get_xticklabels(), rotation=45, ha="right")
+    ax2.axhline(0, color="black", linewidth=0.8)
     fig2.tight_layout()
     st.pyplot(fig2)
 
-# ---------- Evolução mensal por categoria ----------
-st.subheader("Evolução mensal por categoria")
-pivot = (
-    df.pivot_table(index="mes", columns="categoria", values="valor", aggfunc="sum", fill_value=0)
-    .sort_index()
-)
-fig3, ax3 = plt.subplots(figsize=(10, 4))
-pivot.plot(kind="bar", stacked=True, ax=ax3)
-ax3.set_xlabel("Mês")
-ax3.set_ylabel("Valor")
-ax3.legend(title="Categoria", bbox_to_anchor=(1.01, 1), loc="upper left")
-plt.setp(ax3.get_xticklabels(), rotation=45, ha="right")
-fig3.tight_layout()
-st.pyplot(fig3)
+# ---------- Evolução mensal (só quando "Todos") ----------
+if mes_sel == "Todos" and not df_d.empty:
+    st.subheader("Evolução mensal por categoria")
+    pivot = (
+        df_d.pivot_table(index="mes", columns="categoria", values="valor", aggfunc="sum", fill_value=0)
+        .sort_index()
+    )
+    fig3, ax3 = plt.subplots(figsize=(10, 4))
+    pivot.plot(kind="bar", stacked=True, ax=ax3)
+    ax3.set_xlabel("Mês")
+    ax3.set_ylabel("Valor")
+    ax3.legend(title="Categoria", bbox_to_anchor=(1.01, 1), loc="upper left")
+    plt.setp(ax3.get_xticklabels(), rotation=45, ha="right")
+    fig3.tight_layout()
+    st.pyplot(fig3)
 
-# ---------- Tabela e remoção ----------
+# ---------- Tabelas ----------
+st.subheader("Entradas")
+if dfe.empty:
+    st.caption("Nenhuma entrada neste período.")
+else:
+    tab_e = dfe.sort_values("data", ascending=False).copy()
+    tab_e["data"] = tab_e["data"].dt.strftime("%d/%m/%Y")
+    st.dataframe(tab_e[COLS], use_container_width=True)
+
 st.subheader("Despesas")
 tabela = dff.sort_values("data", ascending=False).copy()
 tabela["data"] = tabela["data"].dt.strftime("%d/%m/%Y")
-st.dataframe(tabela[["data", "descricao", "categoria", "valor"]], use_container_width=True)
+if tabela.empty:
+    st.caption("Nenhuma despesa neste período.")
+else:
+    st.dataframe(tabela[COLS], use_container_width=True)
 
 st.download_button(
     "Baixar CSV",
-    tabela[["data", "descricao", "categoria", "valor"]].to_csv(index=False).encode("utf-8"),
+    tabela[COLS].to_csv(index=False).encode("utf-8"),
     "despesas.csv",
     "text/csv",
 )
 
-def gerar_pdf(dados, titulo):
-    """Cria o relatório em PDF (resumo + gráficos + tabela) só com matplotlib."""
+
+def gerar_pdf(desp, entr, titulo):
+    """Cria o relatório em PDF (balanço + gráficos + tabela) só com matplotlib."""
+    t_e = float(entr["valor"].sum())
+    t_d = float(desp["valor"].sum())
+    sld = t_e - t_d
     buf = io.BytesIO()
     with PdfPages(buf) as pdf:
-        # Página 1: resumo e gráficos
         fig = plt.figure(figsize=(8.27, 11.69))
-        fig.suptitle(f"Relatório de Despesas - {titulo}", fontsize=16, fontweight="bold")
+        fig.suptitle(f"Relatório financeiro - {titulo}", fontsize=16, fontweight="bold")
         fig.text(
             0.1, 0.90,
-            f"Total: {dados['valor'].sum():,.2f}    "
-            f"Despesas: {len(dados)}    "
-            f"Média: {dados['valor'].mean():,.2f}",
+            f"Entradas: {t_e:,.2f}    Despesas: {t_d:,.2f}    Saldo: {sld:,.2f}",
             fontsize=11,
         )
-        ax1 = fig.add_axes([0.1, 0.50, 0.8, 0.35])
-        por_cat = dados.groupby("categoria")["valor"].sum()
-        ax1.pie(por_cat, labels=por_cat.index, autopct="%1.1f%%", startangle=90)
-        ax1.set_title("Por categoria")
+        if not desp.empty:
+            ax1 = fig.add_axes([0.1, 0.50, 0.8, 0.35])
+            por_cat = desp.groupby("categoria")["valor"].sum()
+            ax1.pie(por_cat, labels=por_cat.index, autopct="%1.1f%%", startangle=90)
+            ax1.set_title("Despesas por categoria")
         ax2 = fig.add_axes([0.12, 0.08, 0.78, 0.30])
-        por_mes_pdf = dados.groupby("mes")["valor"].sum().sort_index()
-        barras = ax2.bar(por_mes_pdf.index, por_mes_pdf.values, color="#4C78A8")
+        barras = ax2.bar(
+            ["Entradas", "Despesas", "Saldo"],
+            [t_e, t_d, sld],
+            color=["#2E7D32", "#C62828", "#1565C0" if sld >= 0 else "#EF6C00"],
+        )
         ax2.bar_label(barras, fmt="%.0f")
-        ax2.set_title("Por mês")
-        plt.setp(ax2.get_xticklabels(), rotation=45, ha="right")
+        ax2.axhline(0, color="black", linewidth=0.8)
+        ax2.set_title("Entradas vs Despesas")
         pdf.savefig(fig)
         plt.close(fig)
 
-        # Páginas seguintes: tabela (40 linhas por página)
-        linhas = dados.sort_values("data")[["data", "descricao", "categoria", "valor"]].copy()
+        linhas = desp.sort_values("data")[COLS].copy()
         linhas["data"] = linhas["data"].dt.strftime("%d/%m/%Y")
         linhas["valor"] = linhas["valor"].map(lambda v: f"{v:,.2f}")
         for i in range(0, len(linhas), 40):
@@ -387,18 +466,27 @@ def gerar_pdf(dados, titulo):
 
 st.download_button(
     "Baixar relatório PDF",
-    gerar_pdf(dff, "Todos os meses" if mes_sel == "Todos" else mes_sel),
-    "relatorio_despesas.pdf",
+    gerar_pdf(dff, dfe, "Todos os meses" if mes_sel == "Todos" else mes_sel),
+    "relatorio_financeiro.pdf",
     "application/pdf",
 )
 
-with st.expander("Remover despesa"):
-    opcoes = {
-        i: f"{d['data']} | {d['categoria']} | {d['descricao']} | {d['valor']:.2f}"
-        for i, d in enumerate(despesas)
-    }
-    escolha = st.selectbox("Escolhe", list(opcoes), format_func=lambda i: opcoes[i])
-    if st.button("Remover"):
-        despesas.pop(escolha)
-        salvar(despesas)
-        st.rerun()
+# ---------- Remoção ----------
+with st.expander("Remover lançamento"):
+    tipo_rem = st.radio("Tipo", ["Despesa", "Entrada"], horizontal=True)
+    lista = despesas if tipo_rem == "Despesa" else entradas
+    if not lista:
+        st.caption("Nada para remover.")
+    else:
+        opcoes = {
+            i: f"{d['data']} | {d['categoria']} | {d['descricao']} | {d['valor']:.2f}"
+            for i, d in enumerate(lista)
+        }
+        escolha = st.selectbox("Escolhe", list(opcoes), format_func=lambda i: opcoes[i])
+        if st.button("Remover"):
+            lista.pop(escolha)
+            if tipo_rem == "Despesa":
+                salvar(despesas)
+            else:
+                salvar_ent(entradas)
+            st.rerun()
