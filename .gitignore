@@ -6,3 +6,5 @@ venv/
 .env
 .streamlit/secrets.toml
 .vscode/
+*.json
+.streamlit/secrets.toml
