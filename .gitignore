@@ -1,0 +1,8 @@
+despesas.json
+_pycache_/
+*.pyc
+.venv/
+venv/
+.env
+.streamlit/secrets.toml
+.vscode/
