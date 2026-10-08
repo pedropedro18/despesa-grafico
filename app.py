@@ -14,7 +14,7 @@ import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
 import streamlit as st
 
-BASE = os.path.dirname(os.path.abspath(_file_))
+BASE = os.path.dirname(os.path.abspath(__file__))
 ARQUIVO = os.path.join(BASE, "despesas.json")
 ORC_ARQ = os.path.join(BASE, "orcamento.json")
 ENT_ARQ = os.path.join(BASE, "entradas.json")
