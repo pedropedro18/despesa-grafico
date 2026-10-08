@@ -3,23 +3,20 @@
 Requisitos: pip install streamlit matplotlib pandas
 Executar:   streamlit run app.py
 """
-import calendar
 import hmac
 import io
 import json
 import os
 from datetime import date
-from uuid import uuid4
 
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
 import streamlit as st
 
-BASE = os.path.dirname(os.path.abspath(__file__))
+BASE = os.path.dirname(os.path.abspath(_file_))
 ARQUIVO = os.path.join(BASE, "despesas.json")
 ORC_ARQ = os.path.join(BASE, "orcamento.json")
-REC_ARQ = os.path.join(BASE, "recorrentes.json")
 ENT_ARQ = os.path.join(BASE, "entradas.json")
 
 CATEGORIAS = ["Alimentação", "Transporte", "Moradia", "Saúde", "Educação", "Lazer", "Outros"]
@@ -149,42 +146,6 @@ def salvar_orc(orc):
     gravar_dado("orcamento", orc, ORC_ARQ)
 
 
-def carregar_rec():
-    return ler_dado("recorrentes", [], REC_ARQ)
-
-
-def salvar_rec(rec):
-    gravar_dado("recorrentes", rec, REC_ARQ)
-
-
-def aplicar_recorrentes(despesas, recorrentes):
-    """Lança as despesas fixas de cada mês (desde o início até hoje) que ainda não foram lançadas."""
-    hoje = date.today()
-    mudou = False
-    for r in recorrentes:
-        ano, mes = map(int, r["inicio"].split("-"))
-        while (ano, mes) <= (hoje.year, hoje.month):
-            chave = f"{ano:04d}-{mes:02d}"
-            if chave not in r["gerados"]:
-                dia = min(r["dia"], calendar.monthrange(ano, mes)[1])
-                data = date(ano, mes, dia)
-                if data > hoje:
-                    break
-                despesas.append({
-                    "data": data.isoformat(),
-                    "descricao": r["descricao"],
-                    "categoria": r["categoria"],
-                    "valor": r["valor"],
-                    "recorrente": True,
-                })
-                r["gerados"].append(chave)
-                mudou = True
-            mes += 1
-            if mes > 12:
-                ano, mes = ano + 1, 1
-    return mudou
-
-
 def montar_df(lista):
     """Converte a lista de lançamentos num DataFrame (mesmo se estiver vazia)."""
     df = pd.DataFrame(lista) if lista else pd.DataFrame(columns=COLS)
@@ -197,11 +158,6 @@ def montar_df(lista):
 despesas = carregar()
 entradas = carregar_ent()
 orcamento = carregar_orc()
-recorrentes = carregar_rec()
-
-if aplicar_recorrentes(despesas, recorrentes):
-    salvar(despesas)
-    salvar_rec(recorrentes)
 
 st.title("💰 Controle de Despesas")
 
@@ -246,37 +202,6 @@ with st.sidebar:
                 st.rerun()
             else:
                 st.error("O valor deve ser maior que zero.")
-
-    st.header("Despesas fixas (mensais)")
-    with st.form("rec", clear_on_submit=True):
-        r_desc = st.text_input("Descrição (ex: Renda, Internet)")
-        r_cat = st.selectbox("Categoria", CATEGORIAS, key="rec_cat")
-        r_valor = st.number_input("Valor", min_value=0.0, step=100.0, format="%.2f", key="rec_valor")
-        r_dia = st.number_input("Dia do mês", min_value=1, max_value=31, value=1, step=1)
-        if st.form_submit_button("Adicionar despesa fixa"):
-            if r_valor > 0 and r_desc.strip():
-                recorrentes.append({
-                    "id": uuid4().hex[:8],
-                    "descricao": r_desc.strip(),
-                    "categoria": r_cat,
-                    "valor": r_valor,
-                    "dia": int(r_dia),
-                    "inicio": date.today().strftime("%Y-%m"),
-                    "gerados": [],
-                })
-                salvar_rec(recorrentes)
-                st.rerun()
-            else:
-                st.error("Preenche a descrição e um valor maior que zero.")
-
-    if recorrentes:
-        for r in recorrentes:
-            c_a, c_b = st.columns([4, 1])
-            c_a.caption(f"{r['descricao']} · {r['valor']:,.2f} · dia {r['dia']}")
-            if c_b.button("✕", key=f"del_{r['id']}"):
-                recorrentes.remove(r)
-                salvar_rec(recorrentes)
-                st.rerun()
 
     st.header("Orçamento mensal")
     with st.form("orc"):
