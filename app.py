@@ -261,8 +261,15 @@ class ErroGemini(RuntimeError):
     """Erro da API Gemini com o código HTTP (para decidir reserva/mensagem)."""
 
     def _init_(self, status, texto):
-        super()._init_(f"({status}) {texto}")
+        # guardar os atributos ANTES de chamar o construtor base
         self.status = status
+        self.texto = texto
+        super()._init_(f"({status}) {texto}")
+
+
+def codigo_erro(e):
+    """Devolve o código HTTP do erro, ou None se não existir (nunca falha)."""
+    return getattr(e, "status", None)
 
 
 def chamar_gemini(chave, modelo, partes):
@@ -886,7 +893,7 @@ with tab_ia:
                             break
                         except ErroGemini as e:
                             ultimo_erro = e
-                            if e.status not in (429, 503):
+                            if codigo_erro(e) not in (429, 503):
                                 raise
                 if resposta is None:
                     raise ultimo_erro
@@ -894,9 +901,10 @@ with tab_ia:
                 if falar_resp:
                     falar(resposta)
             except ErroGemini as e:
-                if e.status == 429:
+                cod = codigo_erro(e)
+                if cod == 429:
                     st.warning("Limite de uso do Gemini atingido. Tenta daqui a uns minutos ou amanhã.")
-                elif e.status == 503:
+                elif cod == 503:
                     st.warning("O modelo está sobrecarregado neste momento. Tenta novamente daqui a pouco.")
                 else:
                     st.error(f"Erro da API: {e}")
