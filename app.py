@@ -7,7 +7,7 @@ Executar:   streamlit run app.py
 Secrets (.streamlit/secrets.toml ou Settings > Secrets no Streamlit Cloud):
     APP_PASSWORD = "..."
     GEMINI_API_KEY = "..."
-    GEMINI_MODEL = "gemini-2.5-flash"   # opcional
+    GEMINI_MODEL = "gemini-3.8-flash"   # opcional
     [email]                             # opcional
     [db]                                # opcional, TiDB
 """
@@ -827,7 +827,7 @@ with tab_ia:
             else:
                 partes = [{"text": f"{contexto}\n\nPergunta: {pergunta}"}]
             try:
-                modelo = st.secrets.get("GEMINI_MODEL", "gemini-2.5-flash")
+                modelo = st.secrets.get("GEMINI_MODEL", "gemini-3.8-flash")
                 with st.spinner("A pensar..."):
                     resposta = chamar_gemini(chave_api, modelo, partes)
                 st.markdown(resposta)
