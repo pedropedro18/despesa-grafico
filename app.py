@@ -174,18 +174,20 @@ def descrever(d):
 
 
 def expandir_fixas(tipo):
-    """Gera os lançamentos mensais dos fixos, do mês de início até hoje."""
+    """Gera os lançamentos mensais dos fixos, do mês de início até hoje
+    (ignora os meses listados em f['excluir'])."""
     hoje = date.today()
     saida = []
     for f in fixas:
         if f["tipo"] != tipo:
             continue
         ini = date.fromisoformat(f["inicio"])
+        excluir = f.get("excluir", [])
         atual = date(ini.year, ini.month, 1)
         while atual <= date(hoje.year, hoje.month, 1):
             dia = min(int(f["dia"]), calendar.monthrange(atual.year, atual.month)[1])
             d = date(atual.year, atual.month, dia)
-            if ini <= d <= hoje:
+            if ini <= d <= hoje and atual.strftime("%Y-%m") not in excluir:
                 saida.append({
                     "data": d.isoformat(),
                     "descricao": f["descricao"],
@@ -888,3 +890,35 @@ with tab_cfg:
                 gravar("fixas", fixas)
                 st.rerun()
         st.caption("Cada fixo entra no saldo quando a data do mês chega; apagar um fixo remove também o histórico gerado por ele.")
+
+    # ---------- Apagar histórico do mês ----------
+    st.subheader("🗑️ Apagar histórico do mês")
+    meses_del = sorted({d["data"][:7] for d in despesas + entradas} | set(df_d["mes"]) | set(df_e["mes"]),
+                       reverse=True)
+    if not meses_del:
+        st.caption("Sem histórico para apagar.")
+    else:
+        mes_del = st.selectbox("Mês a apagar", meses_del, key="del_mes")
+        n_d = sum(d["data"].startswith(mes_del) for d in despesas)
+        n_e = sum(d["data"].startswith(mes_del) for d in entradas)
+        st.warning(f"Serão apagadas {n_d} despesas e {n_e} entradas de {mes_del}. "
+                   "Não pode ser desfeito: baixa o CSV/Excel antes.")
+        sem_fixas = st.checkbox("Apagar também os lançamentos fixos deste mês",
+                                key="del_fixas")
+        conf = st.text_input(f"Escreve APAGAR {mes_del} para confirmar", key="del_conf")
+        if st.button("Apagar mês", key="del_btn"):
+            if conf.strip() != f"APAGAR {mes_del}":
+                st.error("Confirmação incorreta.")
+            else:
+                despesas[:] = [d for d in despesas if not d["data"].startswith(mes_del)]
+                entradas[:] = [d for d in entradas if not d["data"].startswith(mes_del)]
+                gravar("despesas", despesas)
+                gravar("entradas", entradas)
+                if sem_fixas:
+                    for f in fixas:
+                        f.setdefault("excluir", [])
+                        if mes_del not in f["excluir"]:
+                            f["excluir"].append(mes_del)
+                    gravar("fixas", fixas)
+                st.success(f"Mês {mes_del} apagado.")
+                st.rerun()
