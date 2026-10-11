@@ -2,13 +2,13 @@
 
 Requisitos: pip install streamlit matplotlib pandas openpyxl
 Opcionais:  pip install pymysql certifi   (TiDB online)
-            pip install anthropic          (assistente com IA)
+            pip install requests           (assistente com IA - Gemini)
 Executar:   streamlit run app.py
 
 Secrets (.streamlit/secrets.toml ou Settings > Secrets no Streamlit Cloud):
     APP_PASSWORD = "..."
-    ANTHROPIC_API_KEY = "..."        # opcional, para o assistente com IA
-    ANTHROPIC_MODEL = "claude-sonnet-5-5"   # opcional
+    GEMINI_API_KEY = "..."           # opcional, para o assistente com IA
+    GEMINI_MODEL = "gemini-flash-latest"   # opcional
     [email]                           # opcional, para lembretes por e-mail
     host = "smtp.gmail.com"
     port = 465
@@ -763,15 +763,15 @@ with tab_imp:
                 st.rerun()
 
 # =====================================================================
-# ASSISTENTE COM IA
+# ASSISTENTE COM IA (Gemini)
 # =====================================================================
 with tab_ia:
     st.subheader("Assistente financeiro")
-    chave_api = st.secrets.get("ANTHROPIC_API_KEY") if hasattr(st.secrets, "get") else None
+    chave_api = st.secrets.get("GEMINI_API_KEY") if hasattr(st.secrets, "get") else None
     if not chave_api:
-        st.info("Define ANTHROPIC_API_KEY nos secrets para ativar o assistente.")
+        st.info("Define GEMINI_API_KEY nos secrets para ativar o assistente.")
     else:
-        st.caption(f"Os lançamentos de «{periodo}» são enviados à API da Anthropic para responder.")
+        st.caption(f"Os lançamentos de «{periodo}» são enviados à API do Gemini para responder.")
         pergunta = st.text_input("Pergunta", placeholder="Quanto gastei com lazer este mês?", key="ia_perg")
         cA, cB = st.columns(2)
         dicas = cB.button("💡 Dicas de economia", key="ia_dicas")
@@ -791,21 +791,28 @@ with tab_ia:
                 f"DESPESAS (CSV):\n{csv_curto(dm_d)}\nENTRADAS (CSV):\n{csv_curto(dm_e)}"
             )
             try:
-                import anthropic
+                import requests
 
-                cliente = anthropic.Anthropic(api_key=chave_api)
+                modelo = st.secrets.get("GEMINI_MODEL", "gemini-flash-latest")
                 with st.spinner("A pensar..."):
-                    resp = cliente.messages.create(
-                        model=st.secrets.get("ANTHROPIC_MODEL", "claude-sonnet-5-5"),
-                        max_tokens=1000,
-                        system=("És um assistente de finanças pessoais. Responde em português, de forma "
+                    r = requests.post(
+                        f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent",
+                        headers={"x-goog-api-key": chave_api, "Content-Type": "application/json"},
+                        json={
+                            "systemInstruction": {"parts": [{"text": (
+                                "És um assistente de finanças pessoais. Responde em português, de forma "
                                 "curta e prática, usando apenas os dados fornecidos. Se os dados não "
-                                "chegarem para responder, di-lo."),
-                        messages=[{"role": "user", "content": f"{contexto}\n\nPergunta: {pergunta}"}],
+                                "chegarem para responder, di-lo.")}]},
+                            "contents": [{"role": "user",
+                                          "parts": [{"text": f"{contexto}\n\nPergunta: {pergunta}"}]}],
+                        },
+                        timeout=60,
                     )
-                st.markdown("".join(b.text for b in resp.content if b.type == "text"))
-            except ImportError:
-                st.error("Instala o pacote: pip install anthropic")
+                if r.status_code != 200:
+                    st.error(f"Erro da API ({r.status_code}): {r.text[:300]}")
+                else:
+                    partes = r.json()["candidates"][0]["content"]["parts"]
+                    st.markdown("".join(p.get("text", "") for p in partes))
             except Exception as e:
                 st.error(f"Erro ao contactar a API: {e}")
 
