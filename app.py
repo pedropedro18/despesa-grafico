@@ -31,7 +31,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 
-CATEGORIAS_BASE = ["Alimentação", "Educação", "Luz", "Banco", "Lazer", "Outros",
+CATEGORIAS_BASE = ["Alimentação", "Educação", "Luz", "Banco", "Lazer", "Divída",
                    "Internet", "Propinas", "Dízimo", "Saúde", "ZAP"]
 FONTES = ["Salário", "Freelance", "Investimentos", "Presente", "Outros"]
 COLS = ["data", "descricao", "categoria", "conta", "valor"]
