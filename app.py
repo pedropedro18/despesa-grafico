@@ -264,8 +264,9 @@ def chamar_gemini(chave, modelo, partes):
     corpo = {
         "systemInstruction": {"parts": [{"text": (
             "És um assistente de finanças pessoais. Responde em português de Portugal, "
-            "em poucas frases curtas e faladas, sem tabelas nem markdown, usando apenas "
-            "os dados fornecidos. Se não chegarem para responder, di-lo.")}]},
+            "em poucas frases curtas e faladas, sem tabelas nem markdown, baseando-te nos "
+            "dados fornecidos. Para perguntas sobre números, usa apenas esses dados. Para "
+            "pedidos de dicas, podes dar sugestões gerais, indicando que o são.")}]},
         "contents": [{"role": "user", "parts": partes}],
     }
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent"
@@ -837,7 +838,12 @@ with tab_ia:
                 audio_novo = True
 
         if dicas:
-            pergunta = "Analisa as minhas despesas e dá-me dicas práticas e concretas de economia."
+            pergunta = (
+                "Analisa as minhas despesas por categoria e dá-me 4 dicas práticas e concretas "
+                "de economia, começando pelas categorias com maior valor. Se as descrições forem "
+                "gerais, baseia-te no peso de cada categoria e em boas práticas habituais, "
+                "dizendo que são sugestões gerais."
+            )
 
         if dicas or (perguntar and pergunta.strip()) or audio_novo:
             def csv_curto(df):
