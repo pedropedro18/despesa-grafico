@@ -1,27 +1,23 @@
-"""Controle de despesas e entradas em Streamlit + matplotlib (v2, um único utilizador).
+"""Controle de despesas e entradas em Streamlit + matplotlib (v3, com voz).
 
-Requisitos: pip install streamlit matplotlib pandas openpyxl
+Requisitos: pip install streamlit>=1.40 matplotlib pandas openpyxl requests
 Opcionais:  pip install pymysql certifi   (TiDB online)
-            pip install requests           (assistente com IA - Gemini)
 Executar:   streamlit run app.py
 
 Secrets (.streamlit/secrets.toml ou Settings > Secrets no Streamlit Cloud):
     APP_PASSWORD = "..."
-    GEMINI_API_KEY = "..."           # opcional, para o assistente com IA
-    GEMINI_MODEL = "gemini-flash-latest"   # opcional
-    [email]                           # opcional, para lembretes por e-mail
-    host = "smtp.gmail.com"
-    port = 465
-    user = "teu@gmail.com"
-    password = "senha-de-app"
-    [db]                              # opcional, TiDB
-    host = "..." ; port = 4000 ; user = "..." ; password = "..." ; database = "..."
+    GEMINI_API_KEY = "..."
+    GEMINI_MODEL = "gemini-2.5-flash"   # opcional
+    [email]                             # opcional
+    [db]                                # opcional, TiDB
 """
+import base64
 import calendar
 import hmac
 import io
 import json
 import os
+import re
 import smtplib
 from datetime import date
 from email.message import EmailMessage
@@ -30,6 +26,7 @@ from urllib.parse import quote
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from matplotlib.backends.backend_pdf import PdfPages
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -39,7 +36,6 @@ CATEGORIAS_BASE = ["Alimentação", "Educação", "Luz", "Banco", "Lazer", "Outr
 FONTES = ["Salário", "Freelance", "Investimentos", "Presente", "Outros"]
 COLS = ["data", "descricao", "categoria", "conta", "valor"]
 
-# Palavras-chave para categorizar automaticamente o extrato (edita à vontade)
 REGRAS_DESPESA = {
     "Alimentação": ["supermerc", "restaur", "mercado", "padaria", "pizza", "ifood", "continente",
                     "lidl", "aldi", "pingo", "café", "cafe", "talho", "pastelaria"],
@@ -96,7 +92,6 @@ with st.sidebar:
 
 # ---------- Armazenamento (TiDB ou JSON local) ----------
 def usa_db():
-    """True se existir a secção [db] nos secrets (modo online com TiDB)."""
     try:
         return "db" in st.secrets
     except Exception:
@@ -122,7 +117,6 @@ def _conn():
 
 
 def ler(chave, padrao):
-    """Lê um bloco de dados (JSON) da base de dados ou do ficheiro local <chave>.json."""
     if usa_db():
         conn = _conn()
         try:
@@ -144,7 +138,6 @@ def ler(chave, padrao):
 
 
 def gravar(chave, valor):
-    """Grava um bloco de dados (JSON) na base de dados ou no ficheiro local."""
     if usa_db():
         conn = _conn()
         try:
@@ -163,7 +156,6 @@ def gravar(chave, valor):
 
 # ---------- Utilitários ----------
 def somar_meses(d, n):
-    """Soma n meses a uma data, ajustando o dia ao tamanho do mês."""
     m = d.month - 1 + n
     ano, mes = d.year + m // 12, m % 12 + 1
     return date(ano, mes, min(d.day, calendar.monthrange(ano, mes)[1]))
@@ -174,8 +166,6 @@ def descrever(d):
 
 
 def expandir_fixas(tipo):
-    """Gera os lançamentos mensais dos fixos, do mês de início até hoje
-    (ignora os meses listados em f['excluir'])."""
     hoje = date.today()
     saida = []
     for f in fixas:
@@ -200,7 +190,6 @@ def expandir_fixas(tipo):
 
 
 def montar_df(base, extras):
-    """DataFrame com lançamentos guardados (idx = posição) + fixos gerados (idx = -1)."""
     linhas = [{**d, "idx": i, "fixa": False} for i, d in enumerate(base)]
     linhas += [{**d, "idx": -1, "fixa": True} for d in extras]
     df = pd.DataFrame(linhas) if linhas else pd.DataFrame(columns=COLS + ["idx", "fixa"])
@@ -214,7 +203,6 @@ def montar_df(base, extras):
 
 
 def converter_valor(x):
-    """Converte texto de extrato ('1.234,56', '-12.5', '€ 10,00') em número."""
     if isinstance(x, (int, float)):
         return float(x)
     s = str(x).strip().replace("€", "").replace("R$", "").replace(" ", "")
@@ -232,7 +220,7 @@ def converter_valor(x):
 
 def categorizar(descricao, e_entrada):
     d = str(descricao).lower()
-    for cat in config["categorias"]:  # categorias personalizadas: nome dentro da descrição
+    for cat in config["categorias"]:
         if not e_entrada and cat.lower() in d:
             return cat
     regras = REGRAS_ENTRADA if e_entrada else REGRAS_DESPESA
@@ -250,6 +238,43 @@ def enviar_email(assunto, corpo, destino):
     with smtplib.SMTP_SSL(cfg.get("host", "smtp.gmail.com"), int(cfg.get("port", 465))) as s:
         s.login(cfg["user"], cfg["password"])
         s.send_message(msg)
+
+
+# ---------- Voz e IA ----------
+def falar(texto):
+    """Lê o texto em voz alta com a voz do navegador (pt-PT)."""
+    limpo = re.sub(r"[*#`_>|-]+", " ", texto)
+    js = json.dumps(limpo)
+    components.html(
+        f"""<button onclick="f()" style="padding:8px 14px;font-size:16px">🔊 Ouvir resposta</button>
+        <script>
+        function f(){{const u=new SpeechSynthesisUtterance({js});
+        u.lang='pt-PT';speechSynthesis.cancel();speechSynthesis.speak(u);}}
+        f();
+        </script>""",
+        height=60,
+    )
+
+
+def chamar_gemini(chave, modelo, partes):
+    import requests
+
+    r = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent",
+        headers={"x-goog-api-key": chave, "Content-Type": "application/json"},
+        json={
+            "systemInstruction": {"parts": [{"text": (
+                "És um assistente de finanças pessoais. Responde em português de Portugal, "
+                "em poucas frases curtas e faladas, sem tabelas nem markdown, usando apenas "
+                "os dados fornecidos. Se não chegarem para responder, di-lo.")}]},
+            "contents": [{"role": "user", "parts": partes}],
+        },
+        timeout=90,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"({r.status_code}) {r.text[:300]}")
+    ps = r.json()["candidates"][0]["content"]["parts"]
+    return "".join(p.get("text", "") for p in ps)
 
 
 # ---------- Dados ----------
@@ -324,7 +349,7 @@ for c in urgentes:
     quando = f"venceu há {-dias} dia(s)" if dias < 0 else ("vence hoje" if dias == 0 else f"vence em {dias} dia(s)")
     (st.error if dias < 0 else st.warning)(f"🔔 {c['descricao']} ({float(c['valor']):,.2f}) {quando}.")
 
-# ---------- Filtro por mês (padrão: mês atual) ----------
+# ---------- Filtro por mês ----------
 mes_atual = hoje.strftime("%Y-%m")
 lista_meses = sorted(set(df_d["mes"]) | set(df_e["mes"]) | {mes_atual}, reverse=True)
 meses = ["Todos"] + lista_meses
@@ -368,7 +393,6 @@ periodo = "Todos os meses" if mes_sel == "Todos" else mes_sel
 
 
 def gerar_pdf(desp, entr, titulo):
-    """Cria o relatório em PDF (balanço + gráficos + tabela) só com matplotlib."""
     t_e = float(entr["valor"].sum())
     t_d = float(desp["valor"].sum())
     sld = t_e - t_d
@@ -411,7 +435,6 @@ def gerar_pdf(desp, entr, titulo):
 
 
 def gerar_excel(desp, entr):
-    """Exporta entradas, despesas e resumo por categoria para .xlsx."""
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as xw:
         for nome, df in (("Entradas", entr), ("Despesas", desp)):
@@ -451,7 +474,6 @@ with tab_res:
     elif total_d > 0:
         st.warning("Há despesas, mas nenhuma entrada neste período.")
 
-    # Meta de economia
     meta = float(config["meta"])
     if meta > 0 and mes_sel != "Todos":
         guardado = max(saldo, 0.0)
@@ -462,7 +484,6 @@ with tab_res:
         else:
             st.info(f"Faltam {meta - max(saldo, 0.0):,.2f} para a meta deste mês.")
 
-    # Projeção (só no mês atual)
     if mes_sel == mes_atual and total_d > 0:
         dias_mes = calendar.monthrange(hoje.year, hoje.month)[1]
         proj_d = total_d / hoje.day * dias_mes
@@ -471,7 +492,6 @@ with tab_res:
         p2.metric("Saldo projetado no fim do mês", f"{total_e - proj_d:,.2f}")
         st.caption("Estimativa linear: ritmo médio diário de gastos até hoje × dias do mês.")
 
-    # Comparação com mês anterior
     if mes_sel != "Todos":
         ano, m = map(int, mes_sel.split("-"))
         ant = somar_meses(date(ano, m, 1), -1).strftime("%Y-%m")
@@ -487,7 +507,6 @@ with tab_res:
             comp["Variação %"] = comp["Diferença"] / comp["Mês anterior"].where(comp["Mês anterior"] > 0) * 100
             st.dataframe(comp.round(2), use_container_width=True)
 
-    # Gráficos
     g1, g2 = st.columns(2)
     with g1:
         st.subheader("Despesas por categoria")
@@ -571,7 +590,6 @@ with tab_lanc:
     d3.download_button("Baixar relatório PDF", gerar_pdf(dff, dfe, periodo),
                        "relatorio_financeiro.pdf", "application/pdf")
 
-    # Editar
     with st.expander("✏️ Editar lançamento"):
         tipo_ed = st.radio("Tipo", ["Despesa", "Entrada"], horizontal=True, key="ed_tipo")
         lista = despesas if tipo_ed == "Despesa" else entradas
@@ -605,7 +623,6 @@ with tab_lanc:
                     else:
                         st.error("O valor deve ser maior que zero.")
 
-    # Remover
     with st.expander("🗑️ Remover lançamento"):
         tipo_rem = st.radio("Tipo", ["Despesa", "Entrada"], horizontal=True, key="rem_tipo")
         lista = despesas if tipo_rem == "Despesa" else entradas
@@ -763,7 +780,7 @@ with tab_imp:
                 st.rerun()
 
 # =====================================================================
-# ASSISTENTE COM IA (Gemini)
+# ASSISTENTE COM IA (Gemini) + VOZ
 # =====================================================================
 with tab_ia:
     st.subheader("Assistente financeiro")
@@ -773,12 +790,25 @@ with tab_ia:
     else:
         st.caption(f"Os lançamentos de «{periodo}» são enviados à API do Gemini para responder.")
         pergunta = st.text_input("Pergunta", placeholder="Quanto gastei com lazer este mês?", key="ia_perg")
+        audio = st.audio_input("🎤 Ou pergunta por voz", key="ia_voz")
+        falar_resp = st.checkbox("🔊 Responder por voz", value=True, key="ia_falar")
         cA, cB = st.columns(2)
-        dicas = cB.button("💡 Dicas de economia", key="ia_dicas")
         perguntar = cA.button("Perguntar", key="ia_btn")
+        dicas = cB.button("💡 Dicas de economia", key="ia_dicas")
+
+        # áudio novo = pergunta nova (evita repetir ao recarregar a página)
+        audio_bytes = audio.getvalue() if audio else None
+        audio_novo = False
+        if audio_bytes:
+            h = hash(audio_bytes)
+            if st.session_state.get("ia_ultimo_audio") != h:
+                st.session_state["ia_ultimo_audio"] = h
+                audio_novo = True
+
         if dicas:
             pergunta = "Analisa as minhas despesas e dá-me dicas práticas e concretas de economia."
-        if (perguntar or dicas) and pergunta.strip():
+
+        if dicas or (perguntar and pergunta.strip()) or audio_novo:
             def csv_curto(df):
                 t = df.sort_values("data").tail(300)[COLS].copy()
                 t["data"] = t["data"].dt.strftime("%Y-%m-%d")
@@ -790,31 +820,21 @@ with tab_ia:
                 f"Meta de economia mensal: {config['meta']}.\n\n"
                 f"DESPESAS (CSV):\n{csv_curto(dm_d)}\nENTRADAS (CSV):\n{csv_curto(dm_e)}"
             )
+            if audio_novo and not (perguntar or dicas):
+                partes = [{"text": contexto + "\n\nA pergunta do utilizador está no áudio seguinte:"},
+                          {"inlineData": {"mimeType": "audio/wav",
+                                          "data": base64.b64encode(audio_bytes).decode()}}]
+            else:
+                partes = [{"text": f"{contexto}\n\nPergunta: {pergunta}"}]
             try:
-                import requests
-
-                modelo = st.secrets.get("GEMINI_MODEL", "gemini-flash-latest")
+                modelo = st.secrets.get("GEMINI_MODEL", "gemini-2.5-flash")
                 with st.spinner("A pensar..."):
-                    r = requests.post(
-                        f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent",
-                        headers={"x-goog-api-key": chave_api, "Content-Type": "application/json"},
-                        json={
-                            "systemInstruction": {"parts": [{"text": (
-                                "És um assistente de finanças pessoais. Responde em português, de forma "
-                                "curta e prática, usando apenas os dados fornecidos. Se os dados não "
-                                "chegarem para responder, di-lo.")}]},
-                            "contents": [{"role": "user",
-                                          "parts": [{"text": f"{contexto}\n\nPergunta: {pergunta}"}]}],
-                        },
-                        timeout=60,
-                    )
-                if r.status_code != 200:
-                    st.error(f"Erro da API ({r.status_code}): {r.text[:300]}")
-                else:
-                    partes = r.json()["candidates"][0]["content"]["parts"]
-                    st.markdown("".join(p.get("text", "") for p in partes))
+                    resposta = chamar_gemini(chave_api, modelo, partes)
+                st.markdown(resposta)
+                if falar_resp:
+                    falar(resposta)
             except Exception as e:
-                st.error(f"Erro ao contactar a API: {e}")
+                st.error(f"Erro da API: {e}")
 
 # =====================================================================
 # CONFIGURAÇÕES
@@ -898,7 +918,6 @@ with tab_cfg:
                 st.rerun()
         st.caption("Cada fixo entra no saldo quando a data do mês chega; apagar um fixo remove também o histórico gerado por ele.")
 
-    # ---------- Apagar histórico do mês ----------
     st.subheader("🗑️ Apagar histórico do mês")
     meses_del = sorted({d["data"][:7] for d in despesas + entradas} | set(df_d["mes"]) | set(df_e["mes"]),
                        reverse=True)
