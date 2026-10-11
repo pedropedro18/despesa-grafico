@@ -257,20 +257,29 @@ def falar(texto):
 
 
 def chamar_gemini(chave, modelo, partes):
+    import time
+
     import requests
 
-    r = requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent",
-        headers={"x-goog-api-key": chave, "Content-Type": "application/json"},
-        json={
-            "systemInstruction": {"parts": [{"text": (
-                "És um assistente de finanças pessoais. Responde em português de Portugal, "
-                "em poucas frases curtas e faladas, sem tabelas nem markdown, usando apenas "
-                "os dados fornecidos. Se não chegarem para responder, di-lo.")}]},
-            "contents": [{"role": "user", "parts": partes}],
-        },
-        timeout=90,
-    )
+    corpo = {
+        "systemInstruction": {"parts": [{"text": (
+            "És um assistente de finanças pessoais. Responde em português de Portugal, "
+            "em poucas frases curtas e faladas, sem tabelas nem markdown, usando apenas "
+            "os dados fornecidos. Se não chegarem para responder, di-lo.")}]},
+        "contents": [{"role": "user", "parts": partes}],
+    }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent"
+    for tentativa in range(4):
+        r = requests.post(
+            url,
+            headers={"x-goog-api-key": chave, "Content-Type": "application/json"},
+            json=corpo,
+            timeout=90,
+        )
+        if r.status_code in (429, 500, 503) and tentativa < 3:
+            time.sleep(2 ** tentativa)  # espera 1s, 2s, 4s
+            continue
+        break
     if r.status_code != 200:
         raise RuntimeError(f"({r.status_code}) {r.text[:300]}")
     ps = r.json()["candidates"][0]["content"]["parts"]
