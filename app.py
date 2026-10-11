@@ -8,6 +8,7 @@ Secrets (.streamlit/secrets.toml ou Settings > Secrets no Streamlit Cloud):
     APP_PASSWORD = "..."
     GEMINI_API_KEY = "..."
     GEMINI_MODEL = "gemini-3.8-flash"   # opcional
+    GEMINI_MODEL_FALLBACK = "..."       # opcional, modelo de reserva (429/503)
     [email]                             # opcional
     [db]                                # opcional, TiDB
 """
@@ -256,6 +257,14 @@ def falar(texto):
     )
 
 
+class ErroGemini(RuntimeError):
+    """Erro da API Gemini com o código HTTP (para decidir reserva/mensagem)."""
+
+    def _init_(self, status, texto):
+        super()._init_(f"({status}) {texto}")
+        self.status = status
+
+
 def chamar_gemini(chave, modelo, partes):
     import time
 
@@ -277,12 +286,12 @@ def chamar_gemini(chave, modelo, partes):
             json=corpo,
             timeout=90,
         )
-        if r.status_code in (429, 500, 503) and tentativa < 3:
+        if r.status_code in (500, 503) and tentativa < 3:
             time.sleep(2 ** tentativa)  # espera 1s, 2s, 4s
             continue
         break
     if r.status_code != 200:
-        raise RuntimeError(f"({r.status_code}) {r.text[:300]}")
+        raise ErroGemini(r.status_code, r.text[:300])
     ps = r.json()["candidates"][0]["content"]["parts"]
     return "".join(p.get("text", "") for p in ps)
 
@@ -863,13 +872,34 @@ with tab_ia:
                                           "data": base64.b64encode(audio_bytes).decode()}}]
             else:
                 partes = [{"text": f"{contexto}\n\nPergunta: {pergunta}"}]
+            modelos = [st.secrets.get("GEMINI_MODEL", "gemini-3.8-flash")]
+            reserva = st.secrets.get("GEMINI_MODEL_FALLBACK")
+            if reserva and reserva not in modelos:
+                modelos.append(reserva)
             try:
-                modelo = st.secrets.get("GEMINI_MODEL", "gemini-3.8-flash")
+                resposta = None
+                ultimo_erro = None
                 with st.spinner("A pensar..."):
-                    resposta = chamar_gemini(chave_api, modelo, partes)
+                    for m in modelos:
+                        try:
+                            resposta = chamar_gemini(chave_api, m, partes)
+                            break
+                        except ErroGemini as e:
+                            ultimo_erro = e
+                            if e.status not in (429, 503):
+                                raise
+                if resposta is None:
+                    raise ultimo_erro
                 st.markdown(resposta)
                 if falar_resp:
                     falar(resposta)
+            except ErroGemini as e:
+                if e.status == 429:
+                    st.warning("Limite de uso do Gemini atingido. Tenta daqui a uns minutos ou amanhã.")
+                elif e.status == 503:
+                    st.warning("O modelo está sobrecarregado neste momento. Tenta novamente daqui a pouco.")
+                else:
+                    st.error(f"Erro da API: {e}")
             except Exception as e:
                 st.error(f"Erro da API: {e}")
 
