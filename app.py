@@ -34,7 +34,8 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 
-CATEGORIAS_BASE = ["Alimentação", "Transporte", "Moradia", "Saúde", "Educação", "Lazer", "Outros"]
+CATEGORIAS_BASE = ["Alimentação", "Educação", "Luz", "Banco", "Lazer", "Outros",
+                   "Internet", "Propinas", "Dízimo", "Saúde", "ZAP"]
 FONTES = ["Salário", "Freelance", "Investimentos", "Presente", "Outros"]
 COLS = ["data", "descricao", "categoria", "conta", "valor"]
 
@@ -42,11 +43,14 @@ COLS = ["data", "descricao", "categoria", "conta", "valor"]
 REGRAS_DESPESA = {
     "Alimentação": ["supermerc", "restaur", "mercado", "padaria", "pizza", "ifood", "continente",
                     "lidl", "aldi", "pingo", "café", "cafe", "talho", "pastelaria"],
-    "Transporte": ["uber", "bolt", "combust", "gasol", "posto", "metro", "metrô", "via verde",
-                   "estacion", "onibus", "ônibus", "autocarro", "comboio"],
-    "Moradia": ["aluguel", "renda", "condom", "energia", "água", "agua", "internet", "edp", "gás"],
+    "Luz": ["energia", "edp", "eletric", "elétric", "luz"],
+    "Internet": ["internet", "fibra", "wifi"],
+    "ZAP": ["zap"],
+    "Banco": ["banco", "comiss", "juros", "tarifa", "iban"],
     "Saúde": ["farmac", "clinica", "clínica", "hospital", "médic", "medic", "dent"],
-    "Educação": ["escola", "curso", "udemy", "livraria", "faculdade", "propina", "mensalidade"],
+    "Educação": ["escola", "curso", "udemy", "livraria", "faculdade"],
+    "Propinas": ["propina", "mensalidade"],
+    "Dízimo": ["dizimo", "dízimo", "igreja"],
     "Lazer": ["netflix", "spotify", "cinema", "steam", "viagem", "hotel", "airbnb", "disney"],
 }
 REGRAS_ENTRADA = {
@@ -249,7 +253,6 @@ def enviar_email(assunto, corpo, destino):
 # ---------- Dados ----------
 despesas = ler("despesas", [])
 entradas = ler("entradas", [])
-orcamento = ler("orcamento", {})
 fixas = ler("fixas", [])
 a_pagar = ler("a_pagar", [])
 config = {"meta": 0.0, "categorias": [], "contas": ["Carteira"], "whatsapp": "",
@@ -308,19 +311,6 @@ with st.sidebar:
                 st.rerun()
             else:
                 st.error("O valor deve ser maior que zero.")
-
-    st.header("Orçamento mensal")
-    with st.form("orc"):
-        novo = {}
-        for cat in CATEGORIAS:
-            novo[cat] = st.number_input(
-                cat, min_value=0.0, step=1000.0, value=float(orcamento.get(cat, 0.0)),
-                format="%.2f", key=f"orc_{cat}",
-            )
-        if st.form_submit_button("Guardar orçamento"):
-            gravar("orcamento", novo)
-            st.success("Orçamento guardado.")
-            st.rerun()
 
 # ---------- Alertas de contas a pagar ----------
 hoje = date.today()
@@ -495,24 +485,6 @@ with tab_res:
             comp["Variação %"] = comp["Diferença"] / comp["Mês anterior"].where(comp["Mês anterior"] > 0) * 100
             st.dataframe(comp.round(2), use_container_width=True)
 
-    # Orçamento e alertas
-    if mes_sel != "Todos" and any(v > 0 for v in orcamento.values()):
-        st.subheader(f"Orçamento de {mes_sel}")
-        gasto_cat = dff.groupby("categoria")["valor"].sum()
-        for cat in CATEGORIAS:
-            limite = orcamento.get(cat, 0.0)
-            if limite <= 0:
-                continue
-            gasto = float(gasto_cat.get(cat, 0.0))
-            pct = gasto / limite
-            st.progress(min(pct, 1.0), text=f"{cat}: {gasto:,.2f} / {limite:,.2f} ({pct:.0%})")
-            if pct > 1:
-                st.error(f"⚠️ {cat}: ultrapassaste o orçamento em {gasto - limite:,.2f}.")
-            elif pct >= 0.8:
-                st.warning(f"{cat}: já usaste {pct:.0%} do orçamento.")
-    elif any(v > 0 for v in orcamento.values()):
-        st.caption("Escolhe um mês específico para ver o progresso do orçamento.")
-
     # Gráficos
     g1, g2 = st.columns(2)
     with g1:
@@ -672,7 +644,7 @@ with tab_pagar:
         dias = (date.fromisoformat(c["vencimento"]) - hoje).days
         estado = "🔴 vencida" if dias < 0 else ("🟠 hoje" if dias == 0 else f"em {dias} dia(s)")
         a, b, d = st.columns([5, 2, 2])
-        a.write(f"*{c['descricao']}* — {float(c['valor']):,.2f} · {c['vencimento']} ({estado})")
+        a.write(f"{c['descricao']} — {float(c['valor']):,.2f} · {c['vencimento']} ({estado})")
         if b.button("✅ Paga", key=f"pg_{i}"):
             despesas.append({"data": hoje.isoformat(), "descricao": c["descricao"],
                              "categoria": c["categoria"], "conta": CONTAS[0],
@@ -813,7 +785,6 @@ with tab_ia:
             contexto = (
                 f"Período: {periodo}. Data de hoje: {hoje.isoformat()}.\n"
                 f"Entradas: {float(dm_e['valor'].sum()):.2f}; Despesas: {float(dm_d['valor'].sum()):.2f}.\n"
-                f"Orçamento mensal por categoria: {json.dumps(orcamento, ensure_ascii=False)}.\n"
                 f"Meta de economia mensal: {config['meta']}.\n\n"
                 f"DESPESAS (CSV):\n{csv_curto(dm_d)}\nENTRADAS (CSV):\n{csv_curto(dm_e)}"
             )
@@ -910,7 +881,7 @@ with tab_cfg:
     if fixas:
         for i, f in enumerate(fixas):
             x, y = st.columns([6, 1])
-            x.write(f"*{f['tipo']}* · {f['descricao']} · {float(f['valor']):,.2f} · "
+            x.write(f"{f['tipo']} · {f['descricao']} · {float(f['valor']):,.2f} · "
                     f"dia {f['dia']} · desde {f['inicio']}")
             if y.button("🗑️", key=f"fx_del_{i}"):
                 fixas.pop(i)
