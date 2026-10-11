@@ -29,7 +29,6 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 from matplotlib.backends.backend_pdf import PdfPages
-
 BASE = os.path.dirname(os.path.abspath(__file__))
 
 CATEGORIAS_BASE = ["Alimentação", "Educação", "Luz", "Banco", "Lazer", "Dívida",
