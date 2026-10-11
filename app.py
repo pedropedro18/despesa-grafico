@@ -31,9 +31,9 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 
-CATEGORIAS_BASE = ["Alimentação", "Educação", "Luz", "Banco", "Lazer", "Divída",
+CATEGORIAS_BASE = ["Alimentação", "Educação", "Luz", "Banco", "Lazer", "Dívida",
                    "Internet", "Propinas", "Dízimo", "Saúde", "ZAP"]
-FONTES = ["Salário", "Freelance", "Investimentos", "Presente"]
+FONTES = ["Salário", "Freelance", "Investimentos", "Presente", "Outros"]
 COLS = ["data", "descricao", "categoria", "conta", "valor"]
 
 REGRAS_DESPESA = {
@@ -227,7 +227,7 @@ def categorizar(descricao, e_entrada):
     for cat, palavras in regras.items():
         if any(p in d for p in palavras):
             return cat
-    return "Outros"
+    return "Outros" if e_entrada else "Dívida"
 
 
 def enviar_email(assunto, corpo, destino):
@@ -294,6 +294,28 @@ a_pagar = ler("a_pagar", [])
 config = {"meta": 0.0, "categorias": [], "contas": ["Carteira"], "whatsapp": "",
           "email": "", "dias_aviso": 3}
 config.update(ler("config", {}))
+
+
+def _migrar_outros_para_divida():
+    """Converte a categoria antiga 'Outros' (despesas) em 'Dívida' e grava."""
+    for nome, lista in (("despesas", despesas), ("a_pagar", a_pagar)):
+        mudou = False
+        for d in lista:
+            if d.get("categoria") == "Outros":
+                d["categoria"] = "Dívida"
+                mudou = True
+        if mudou:
+            gravar(nome, lista)
+    mudou = False
+    for f in fixas:
+        if f.get("tipo") == "Despesa" and f.get("categoria") == "Outros":
+            f["categoria"] = "Dívida"
+            mudou = True
+    if mudou:
+        gravar("fixas", fixas)
+
+
+_migrar_outros_para_divida()
 
 CATEGORIAS = CATEGORIAS_BASE + [c for c in config["categorias"] if c not in CATEGORIAS_BASE]
 CONTAS = config["contas"] if "Carteira" in config["contas"] else ["Carteira"] + config["contas"]
