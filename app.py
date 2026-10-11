@@ -33,7 +33,7 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 
 CATEGORIAS_BASE = ["Alimentação", "Educação", "Luz", "Banco", "Lazer", "Divída",
                    "Internet", "Propinas", "Dízimo", "Saúde", "ZAP"]
-FONTES = ["Salário", "Freelance", "Investimentos", "Presente", "Outros"]
+FONTES = ["Salário", "Freelance", "Investimentos", "Presente"]
 COLS = ["data", "descricao", "categoria", "conta", "valor"]
 
 REGRAS_DESPESA = {
