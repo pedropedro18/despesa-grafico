@@ -31,14 +31,17 @@ import streamlit.components.v1 as components
 from matplotlib.backends.backend_pdf import PdfPages
 BASE = os.path.dirname(os.path.abspath(__file__))
 
-CATEGORIAS_BASE = ["Alimentação", "Educação", "Luz", "Banco", "Lazer", "Dívida",
-                   "Internet", "Propinas", "Dízimo", "Saúde", "ZAP"]
+CATEGORIAS_BASE = ["Alimentação", "Transporte", "Educação", "Luz", "Banco", "Lazer",
+                   "Dívida", "Internet", "Propinas", "Dízimo", "Saúde", "ZAP"]
 FONTES = ["Salário", "Freelance", "Investimentos", "Presente", "Outros"]
 COLS = ["data", "descricao", "categoria", "conta", "valor"]
 
 REGRAS_DESPESA = {
     "Alimentação": ["supermerc", "restaur", "mercado", "padaria", "pizza", "ifood", "continente",
                     "lidl", "aldi", "pingo", "café", "cafe", "talho", "pastelaria"],
+    "Transporte": ["transporte", "táxi", "taxi", "uber", "bolt", "autocarro", "combustível",
+                   "combustivel", "gasolina", "gasóleo", "gasoleo", "candongueiro", "bilhete",
+                   "metro", "comboio", "portagem"],
     "Luz": ["energia", "edp", "eletric", "elétric", "luz"],
     "Internet": ["internet", "fibra", "wifi"],
     "ZAP": ["zap"],
@@ -1001,8 +1004,13 @@ with tab_cfg:
         mes_del = st.selectbox("Mês a apagar", meses_del, key="del_mes")
         n_d = sum(d["data"].startswith(mes_del) for d in despesas)
         n_e = sum(d["data"].startswith(mes_del) for d in entradas)
+        n_f = int(((df_d["mes"] == mes_del) & df_d["fixa"]).sum()
+                  + ((df_e["mes"] == mes_del) & df_e["fixa"]).sum())
         st.warning(f"Serão apagadas {n_d} despesas e {n_e} entradas de {mes_del}. "
                    "Não pode ser desfeito: baixa o CSV/Excel antes.")
+        if n_f:
+            st.info(f"Este mês tem também {n_f} lançamento(s) fixo(s) 🔁. "
+                    "Marca a opção abaixo para os remover deste mês.")
         sem_fixas = st.checkbox("Apagar também os lançamentos fixos deste mês",
                                 key="del_fixas")
         conf = st.text_input(f"Escreve APAGAR {mes_del} para confirmar", key="del_conf")
