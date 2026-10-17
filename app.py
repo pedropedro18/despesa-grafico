@@ -549,7 +549,7 @@ with tab_res:
         atu = df_d[df_d["mes"] == mes_sel].groupby("categoria")["valor"].sum()
         pas = df_d[df_d["mes"] == ant].groupby("categoria")["valor"].sum()
         t_atu, t_pas = float(atu.sum()), float(pas.sum())
-        if t_atu > 0 or t_pas > 0:
+        if t_pas > 0:
             st.subheader(f"Comparação com {ant}")
             st.metric("Despesas totais", f"{t_atu:,.2f}", delta=f"{t_atu - t_pas:,.2f}",
                       delta_color="inverse")
