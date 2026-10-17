@@ -310,6 +310,7 @@ despesas = ler("despesas", [])
 entradas = ler("entradas", [])
 fixas = ler("fixas", [])
 a_pagar = ler("a_pagar", [])
+economia = ler("economia", [])
 config = {"meta": 0.0, "categorias": [], "contas": ["Carteira"], "whatsapp": "",
           "email": "", "dias_aviso": 3}
 config.update(ler("config", {}))
@@ -497,8 +498,8 @@ def gerar_excel(desp, entr):
     return buf.getvalue()
 
 
-tab_res, tab_lanc, tab_pagar, tab_imp, tab_ia, tab_cfg = st.tabs(
-    ["📊 Resumo", "🧾 Lançamentos", "🔔 Contas a pagar", "📥 Importar extrato",
+tab_res, tab_lanc, tab_eco, tab_pagar, tab_imp, tab_ia, tab_cfg = st.tabs(
+    ["📊 Resumo", "🧾 Lançamentos", "💎 Economia", "🔔 Contas a pagar", "📥 Importar extrato",
      "🤖 Assistente", "⚙️ Configurações"]
 )
 
@@ -686,6 +687,95 @@ with tab_lanc:
                 lista.pop(escolha)
                 gravar("despesas" if tipo_rem == "Despesa" else "entradas", lista)
                 st.rerun()
+
+# =====================================================================
+# ECONOMIA (remanescente guardado e descontos)
+# =====================================================================
+with tab_eco:
+    st.subheader("Economia e remanescente")
+
+    def eco_sinal(mov):
+        return 1.0 if mov["tipo"] == "Depósito" else -1.0
+
+    def eco_liquida(mes=None):
+        return sum(eco_sinal(x) * float(x["valor"]) for x in economia
+                   if mes is None or x["data"][:7] == mes)
+
+    saldo_acum = float(df_e["valor"].sum()) - float(df_d["valor"].sum())
+    eco_total = eco_liquida()
+    disponivel = saldo_acum - eco_total
+
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Remanescente acumulado", f"{saldo_acum:,.2f}")
+    k2.metric("Economia total", f"{eco_total:,.2f}")
+    k3.metric("Remanescente disponível", f"{disponivel:,.2f}")
+    st.caption("Remanescente acumulado = entradas − despesas de todos os meses. "
+               "Disponível = remanescente que ainda não está guardado na economia.")
+
+    mes_ref = mes_atual if mes_sel == "Todos" else mes_sel
+    ent_ref = float(df_e[df_e["mes"] == mes_ref]["valor"].sum())
+    desp_ref = float(df_d[df_d["mes"] == mes_ref]["valor"].sum())
+    por_guardar_ref = (ent_ref - desp_ref) - eco_liquida(mes_ref)
+
+    if por_guardar_ref > 0:
+        if st.button(f"💾 Guardar remanescente de {mes_ref} ({por_guardar_ref:,.2f}) na economia",
+                     key="eco_btn_rapido"):
+            economia.append({"data": hoje.isoformat(), "tipo": "Depósito",
+                             "descricao": f"Remanescente {mes_ref}",
+                             "valor": round(por_guardar_ref, 2)})
+            gravar("economia", economia)
+            st.rerun()
+    else:
+        st.caption(f"Sem remanescente por guardar em {mes_ref}.")
+
+    st.markdown("*Guardar ou descontar valor*")
+    with st.form("form_economia", clear_on_submit=True):
+        eco_tipo = st.radio("Operação", ["Guardar na economia", "Descontar da economia"],
+                            horizontal=True, key="eco_tipo")
+        eco_valor = st.number_input("Valor", min_value=0.0, step=100.0, format="%.2f",
+                                    key="eco_valor")
+        eco_desc = st.text_input("Descrição (opcional)", key="eco_desc")
+        eco_data = st.date_input("Data", value=hoje, key="eco_data")
+        if st.form_submit_button("Aplicar"):
+            if eco_valor <= 0:
+                st.error("O valor deve ser maior que zero.")
+            elif eco_tipo.startswith("Descontar") and eco_valor > eco_total:
+                st.error(f"Não podes descontar mais do que a economia total ({eco_total:,.2f}).")
+            else:
+                dep = eco_tipo.startswith("Guardar")
+                economia.append({
+                    "data": eco_data.isoformat(),
+                    "tipo": "Depósito" if dep else "Desconto",
+                    "descricao": eco_desc or ("Guardado" if dep else "Desconto"),
+                    "valor": float(eco_valor),
+                })
+                gravar("economia", economia)
+                st.rerun()
+
+    st.markdown("*Remanescente por mês*")
+    linhas_eco = []
+    for m in sorted(lista_meses):
+        e_m = float(df_e[df_e["mes"] == m]["valor"].sum())
+        d_m = float(df_d[df_d["mes"] == m]["valor"].sum())
+        g_m = eco_liquida(m)
+        linhas_eco.append({"Mês": m, "Entradas": e_m, "Despesas": d_m,
+                           "Remanescente": e_m - d_m, "Economia (líquida)": g_m,
+                           "Por guardar": (e_m - d_m) - g_m})
+    if linhas_eco:
+        st.dataframe(pd.DataFrame(linhas_eco).round(2), use_container_width=True, hide_index=True)
+
+    st.markdown("*Movimentos da economia*")
+    if not economia:
+        st.caption("Ainda não há movimentos.")
+    for i in range(len(economia) - 1, -1, -1):
+        mov = economia[i]
+        a, b = st.columns([6, 1])
+        sinal = "+" if mov["tipo"] == "Depósito" else "−"
+        a.write(f"{mov['data']} · {mov['tipo']} · {mov['descricao']} · {sinal}{float(mov['valor']):,.2f}")
+        if b.button("🗑️", key=f"eco_del_{i}"):
+            economia.pop(i)
+            gravar("economia", economia)
+            st.rerun()
 
 # =====================================================================
 # CONTAS A PAGAR + LEMBRETES
